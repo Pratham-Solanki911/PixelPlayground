@@ -20,6 +20,20 @@ Build worlds from pluggable **rules**, feed agents through pluggable **observati
 
 ---
 
+## Demo
+
+A scripted 15×15 life scene — a food-hunting snake (agent, `@`), fleeing prey
+(`p`), a stalking predator (`D`), food, plants, and rocks — driven headlessly
+through the engine-free visualizer (`python _media_view.py` to regenerate):
+
+<p align="center">
+<a href="assets/demo.mp4"><img src="assets/demo.gif" alt="alifelab demo" width="420"/></a><br/>
+<span style="font-size:12px;color:#8b949e;">animated preview · <a href="assets/demo.mp4">demo.mp4</a> ·
+<a href="assets/demo.png">demo.png</a> · <a href="assets/demo_ascii.txt">demo_ascii.txt</a></span>
+</p>
+
+---
+
 ## What is PixelPlayground?
 
 PixelPlayground hosts **alifelab**, a small research-oriented framework for experimentation with reinforcement learning agents living in simulated grid worlds. Every piece of the pipeline — world, rules, observation space, action space, reward function, neural architecture, and learning algorithm — is a **named, runtime-registered component** that can be switched by a string in a JSON config. That makes it trivial to sweep experiments, mirror a training run exactly, and resume from disk.

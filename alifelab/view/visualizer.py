@@ -197,14 +197,12 @@ class Visualizer:
         w, h = frame.world.width, frame.world.height
         scale = self.world_scale or max(2, min(28, 760 // max(w, h, 1)))
         world = self.renderer.render(frame, scale=scale, selected_id=self.focused_id)
-        width = world.shape[1]
-        chunks = [world]
-        if self.show_overlay:
-            chunks.insert(0, self.overlay.render(frame, world))
+        base = self.overlay.render(frame, world) if self.show_overlay else world
+        chunks = [base]
         if self.show_panels:
-            chunks.append(self._status_strip(width))
+            chunks.append(self._status_strip(base.shape[1]))
         if self.show_help:
-            chunks.append(self._help_strip(width))
+            chunks.append(self._help_strip(base.shape[1]))
         image = np.vstack(chunks) if chunks else world
         self._display_frame = image
         return image
@@ -460,9 +458,7 @@ class Visualizer:
     def _handle_click(self, pos: tuple[int, int]) -> None:  # pragma: no cover - pygame only
         frame = self.current_frame()
         scale = self.world_scale or max(2, min(28, 760 // max(frame.world.width, frame.world.height, 1)))
-        height_offset = 0
-        if self.show_overlay:
-            height_offset += self.overlay.render(frame, self.renderer.render(frame, scale=1)).shape[0] - frame.world.height * scale
+        height_offset = self.overlay.render(frame, self.renderer.render(frame, scale=1)).shape[0] - frame.world.height * scale if self.show_overlay else 0
         world_h = frame.world.height * scale
         if not (height_offset <= pos[1] < height_offset + world_h):
             return
