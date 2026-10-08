@@ -17,8 +17,11 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from . import palette as pal
+from . import sprites
 from .font import draw_text, text_width
 from .model import TERRAIN_EMPTY, ViewEntity, ViewFrame
+
+SPRITE_MIN_SCALE = 3
 
 
 class Renderer(ABC):
@@ -62,6 +65,9 @@ class EntityRenderer(Renderer):
         scale = max(1, int(scale))
         if self.ignore and entity.species == self.ignore:
             return
+        if scale >= SPRITE_MIN_SCALE:
+            self._draw_sprite(image, h, w, entity, scale=scale, selected=selected)
+            return
         fills = self.cell_fills(entity)
         for (cx, cy), color in fills.items():
             if 0 <= cx < w // scale and 0 <= cy < h // scale:
@@ -77,6 +83,59 @@ class EntityRenderer(Renderer):
                 return
             if 0 <= tx < w // scale and 0 <= ty < h // scale:
                 _stamp(image, tx, ty, scale, pal.blend(pal.species_color(entity.species, entity.kind), (255, 255, 255), 0.55))
+
+    def _draw_sprite(self, image: np.ndarray, h: int, w: int, entity: ViewEntity, *, scale: int, selected: bool) -> None:
+        kind = (entity.kind or entity.species or "").lower()
+        base = pal.species_color(entity.species, entity.kind) if kind not in ("food", "wall", "water", "grass", "resource") else (0, 0, 0)
+        cols = w // scale
+        rows = h // scale
+
+        def in_bounds(cx: int, cy: int) -> bool:
+            return 0 <= cx < cols and 0 <= cy < rows
+
+        if entity.alive:
+            for (cx, cy) in entity.body:
+                if in_bounds(cx, cy):
+                    sprite = sprites._body("snake", base, False)
+                    sprites.stamp_sprite(image, cx, cy, scale, sprite)
+            hx, hy = entity.head
+            if in_bounds(hx, hy):
+                if kind in ("plant", "bush", "tree", "flower", "rock", "stone"):
+                    sprite = sprites._item(kind)
+                elif kind == "food":
+                    sprite = sprites._item("food")
+                elif kind in ("wall", "water", "grass", "resource"):
+                    sprite = sprites._item(kind)
+                else:
+                    sprite = sprites._tinted(kind, base, False)
+                    if entity.is_agent:
+                        sprite = _agent_tint(sprite)
+                    dr = entity.direction if entity.direction else (0, 0)
+                    if dr != (0, 0) and entity.state != "static":
+                        sprites.stamp_sprite(image, hx, hy, scale, sprite, rotate=dr)
+                        if scale >= 8 and entity.is_agent:
+                            _badge(image, hx, hy, scale)
+                        if selected:
+                            _ring(image, hx, hy, scale, pal.SELECTION)
+                        return
+                sprites.stamp_sprite(image, hx, hy, scale, sprite)
+        else:
+            body_sprite = sprites._body("snake", base, True)
+            for (cx, cy) in entity.body:
+                if in_bounds(cx, cy):
+                    sprites.stamp_sprite(image, cx, cy, scale, body_sprite)
+            hx, hy = entity.head
+            if in_bounds(hx, hy):
+                if kind in ("plant", "bush", "tree", "flower", "rock", "stone", "food", "wall", "water", "grass", "resource"):
+                    sprite = sprites._item(kind)
+                else:
+                    sprite = sprites._tinted(kind, base, True)
+                sprite = _pepper(sprite)
+                sprites.stamp_sprite(image, hx, hy, scale, sprite)
+        if selected:
+            hx, hy = entity.head
+            if 0 <= hx < cols and 0 <= hy < rows:
+                _ring(image, hx, hy, scale, pal.SELECTION)
 
 
 class WorldRenderer(Renderer):
@@ -105,6 +164,9 @@ class WorldRenderer(Renderer):
 def _paint_terrain(image: np.ndarray, terrain: np.ndarray, resources: np.ndarray, scale: int) -> None:
     height, width = terrain.shape
     scale = max(1, int(scale))
+    if scale >= SPRITE_MIN_SCALE:
+        _paint_terrain_sprites(image, terrain, resources, scale)
+        return
     maximum = float(resources.max()) if resources.size else 0.0
     for y in range(height):
         for x in range(width):
@@ -119,6 +181,59 @@ def _paint_terrain(image: np.ndarray, terrain: np.ndarray, resources: np.ndarray
             _stamp(image, x, y, scale, color)
 
 
+def _paint_terrain_sprites(image: np.ndarray, terrain: np.ndarray, resources: np.ndarray, scale: int) -> None:
+    height, width = terrain.shape
+    maximum = float(resources.max()) if resources.size else 0.0
+    grass = sprites._item("grass")
+    brick = sprites._item("wall")
+    water = sprites._item("water")
+    resource = sprites._item("resource")
+    for y in range(height):
+        for x in range(width):
+            tile = grass if int(terrain[y, x]) == TERRAIN_EMPTY else brick if int(terrain[y, x]) == 1 else water
+            amount = float(resources[y, x]) if (resources.size and maximum > 0) else 0.0
+            if amount > 0:
+                t = float(np.clip(amount / maximum, 0.0, 1.0))
+                tint = t * 0.6
+                if int(terrain[y, x]) == TERRAIN_EMPTY:
+                    colored = _mix_sprites(grass, resource, tint)
+                    sprites.stamp_sprite(image, x, y, scale, colored)
+                    if scale >= 8:
+                        sprites.stamp_sprite(image, x, y, scale, resource)
+                else:
+                    sprites.stamp_sprite(image, x, y, scale, tile)
+            else:
+                sprites.stamp_sprite(image, x, y, scale, tile)
+
+
+def _mix_sprites(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
+    return (a.astype(np.float32) * (1.0 - t) + b.astype(np.float32) * t).astype(np.uint8)
+
+
+def _agent_tint(sprite: np.ndarray) -> np.ndarray:
+    rgb = sprite[..., :3]
+    alpha = sprite[..., 3:]
+    blended = _mix_sprites(rgb, np.full_like(rgb, 255, dtype=np.uint8), 0.22)
+    return np.dstack([blended, alpha])
+
+
+def _pepper(sprite: np.ndarray) -> np.ndarray:
+    """Dead entities get a faint dark cross so they read as remains."""
+    out = sprite.copy().astype(np.float32)
+    out *= 0.8
+    for i in range(0, sprites.SIZE, 2):
+        out[i, i] = out[i, sprites.SIZE - 1 - i] = 30
+        out[i + 1, i] = out[i + 1, sprites.SIZE - 1 - i] = 30
+    return out.astype(np.uint8)
+
+
+def _badge(image: np.ndarray, cx: int, cy: int, scale: int) -> None:
+    """Small white corner chip marking the RL agent's head cell."""
+    size = max(2, scale // 6)
+    y0, x0 = cy * scale + 1, cx * scale + 1
+    image[y0 : y0 + size, x0 : x0 + size] = pal.SELECTION
+
+
 def _stamp(image: np.ndarray, cx: int, cy: int, scale: int, color) -> None:
     image[cy * scale : (cy + 1) * scale, cx * scale : (cx + 1) * scale] = color
 
@@ -130,7 +245,7 @@ def _ring(image: np.ndarray, cx: int, cy: int, scale: int, color) -> None:
         return
     y0, y1 = cy * scale, (cy + 1) * scale
     x0, x1 = cx * scale, (cx + 1) * scale
-    thickness = max(1, scale // 4)
+    thickness = max(1, scale // 5)
     image[y0 : y0 + thickness, x0:x1] = color
     image[y1 - thickness : y1, x0:x1] = color
     image[y0:y1, x0 : x0 + thickness] = color
