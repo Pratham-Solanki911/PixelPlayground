@@ -8,7 +8,7 @@ import numpy as np
 
 from ..core.interfaces import ObservationBuilder, Rule
 from ..core.snapshot import EntityView, WorldLayers, WorldSnapshot
-from ..core.types import Event, Intent
+from ..core.types import Event, Intent, describe_intent
 from .components import (
     Action,
     Age,
@@ -343,6 +343,7 @@ class WorldEngine:
         solid = entity.get(Solid)
         predator = entity.get(Predator)
         body = entity.get(Body)
+        action = entity.get(Action)
         return EntityView(
             id=entity.id,
             kind=entity.kind,
@@ -366,6 +367,9 @@ class WorldEngine:
             solid=solid is not None,
             movable=entity.has(Action),
             predator=predator is not None and predator.enabled,
+            state=_derive_state(entity),
+            action=describe_intent(action.intent) if action is not None else None,
+            alive=True,
         )
 
     def _index_add(self, entity: Entity) -> None:
@@ -383,3 +387,18 @@ class WorldEngine:
             bucket.remove(entity.id)
             if not bucket:
                 self._cells.pop((pos.x, pos.y), None)
+
+
+def _derive_state(entity: Entity) -> str:
+    """Generic, data-driven state descriptor for visualization."""
+    if entity.get(Obstacle) is not None:
+        return "static"
+    predator = entity.get(Predator)
+    if predator is not None and predator.enabled:
+        return "predator"
+    if entity.get(Edible) is not None:
+        return "consumable"
+    controller = entity.get(Controller)
+    if controller is not None:
+        return f"controlled:{controller.name}"
+    return "alive"

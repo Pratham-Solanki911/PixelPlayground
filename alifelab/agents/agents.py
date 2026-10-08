@@ -123,6 +123,7 @@ class IncrementalTorchAgent(Agent):
         self.net = AgentNetwork(architecture, obs_shape, self.feature_dim, head_specs, recurrent=self.recurrent_name).to(self.device)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.lr)
         self.steps = 0
+        self._last_action: Any = None
         self._init_extra()
 
     def _heads(self, action_space: Space, feature_dim: int) -> dict[str, nn.Module]:
@@ -197,6 +198,20 @@ class IncrementalTorchAgent(Agent):
         out.update(values)
         return out
 
+    def _recurrent_active(self) -> bool:
+        return bool(getattr(self, "_state", None) is not None)
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Generic torch-agent diagnostics; subclasses enrich it."""
+        return {
+            "architecture": self.architecture_name,
+            "recurrent": bool(self.net.is_recurrent),
+            "recurrent_layer": self.recurrent_name,
+            "recurrent_active": self._recurrent_active(),
+            "steps": self.steps,
+            "current_action": self._last_action,
+        }
+
 
 @register_agent("dqn")
 class DQNAgent(IncrementalTorchAgent):
@@ -248,12 +263,13 @@ class DQNAgent(IncrementalTorchAgent):
         return {"q": QValueHead(feature_dim, action_space.n)}
 
     def act(self, observation: np.ndarray, explore: bool = True) -> Any:
-        if explore and self.rng.random() < self.epsilon:
-            action = self.action_space.sample(self.rng)
-        else:
-            with torch.no_grad():
-                q = self.net(self.obs_to_tensor(observation))["q"]
+        with torch.no_grad():
+            q = self.net(self.obs_to_tensor(observation))["q"]
+            if explore and self.rng.random() < self.epsilon:
+                action = self.action_space.sample(self.rng)
+            else:
                 action = int(q.argmax(dim=-1).item())
+            self._last_q = q.detach().cpu().numpy().reshape(-1).tolist()
         self._last_obs = np.asarray(observation, dtype=np.float32)
         self._last_action = action
         return action
@@ -317,6 +333,18 @@ class DQNAgent(IncrementalTorchAgent):
             self.target.eval()
         if "buffer" in extra:
             self.buffer.load_state_dict(extra["buffer"])
+
+    def diagnostics(self) -> dict[str, Any]:
+        info = super().diagnostics()
+        info.update(
+            {
+                "policy": "epsilon-greedy (dueling Q)",
+                "epsilon": self.epsilon,
+                "q_values": getattr(self, "_last_q", None),
+                "buffer_size": len(self.buffer),
+            }
+        )
+        return info
 
 
 @register_agent("a2c")
@@ -390,15 +418,19 @@ class A2CAgent(IncrementalTorchAgent):
     def act(self, observation: np.ndarray, explore: bool = True) -> Any:
         with torch.no_grad():
             h, self._state = self.net.step(self.obs_to_tensor(observation), self._state)
+            self._last_value = float(self.net.heads["value"](h).item())
             if isinstance(self.action_space, DiscreteSpace):
                 logits = self.net.heads["policy"](h)
                 probs = F.softmax(logits, dim=-1)
                 action = int(torch.multinomial(probs, num_samples=1).item())
+                self._last_probs = probs.detach().cpu().numpy().reshape(-1).tolist()
             elif isinstance(self.action_space, BoxSpace):
                 action, _ = self.net.heads["policy"].sample(h)
                 action = action.squeeze(0).cpu().numpy()
+                self._last_probs = None
             else:
                 raise ValueError(f"Unsupported action space {self.action_space!r}")
+        self._last_action = action
         return action
 
     def train(self) -> dict[str, float]:
@@ -452,6 +484,17 @@ class A2CAgent(IncrementalTorchAgent):
             mean_return=float(np.mean(returns)),
         )
 
+    def diagnostics(self) -> dict[str, Any]:
+        info = super().diagnostics()
+        info.update(
+            {
+                "policy": "actor-critic (categorical)" if isinstance(self.action_space, DiscreteSpace) else "actor-critic (gaussian)",
+                "action_probs": getattr(self, "_last_probs", None),
+                "value": getattr(self, "_last_value", None),
+            }
+        )
+        return info
+
 
 @register_agent("a2c_lstm")
 class A2CLSTMAgent(A2CAgent):
@@ -490,10 +533,21 @@ class RandomAgent(Agent):
         super().__init__(observation_space, action_space, seed=seed, **cfg)
 
     def act(self, observation: np.ndarray, explore: bool = True) -> Any:
-        return self.action_space.sample(self.rng)
+        action = self.action_space.sample(self.rng)
+        self._last_action = action
+        return action
 
     def train(self) -> dict[str, float]:
         return {"steps": 0.0}
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "policy": "uniform",
+            "recurrent": False,
+            "recurrent_layer": None,
+            "recurrent_active": False,
+            "current_action": getattr(self, "_last_action", None),
+        }
 
     def state_dict(self) -> dict[str, Any]:
         return {"agent": "random", "rng": self.rng.bit_generator.state}

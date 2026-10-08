@@ -40,6 +40,15 @@ class MoveIntent(Intent):
     dy: int
 
 
+def describe_intent(intent: Intent) -> str:
+    """Describe an intent as a short human-readable string."""
+    if isinstance(intent, IdleIntent):
+        return "idle"
+    if isinstance(intent, MoveIntent):
+        return f"move{intent.dx:+d}{intent.dy:+d}"
+    return type(intent).__name__.replace("Intent", "").lower()
+
+
 @dataclass(frozen=True, slots=True)
 class Event:
     kind: str

@@ -168,3 +168,23 @@ class Agent(ABC):
 
     def parameter_count(self) -> int:
         return 0
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Optional, algorithm-specific diagnostics for visualizers.
+
+        Every key is optional. A visualizer should degrade gracefully when a
+        key is missing. Known optional keys:
+
+        - ``policy``: human-readable policy name
+        - ``architecture``: network architecture name
+        - ``recurrent``: whether the agent uses a recurrent cell
+        - ``recurrent_layer``: ``'lstm'``, ``'gru'``, ...
+        - ``recurrent_active``: whether a hidden state is being carried now
+        - ``current_action``: the action produced by the last ``act()``
+        - ``action_probs``: action probability vector (when available)
+        - ``q_values``: per-action Q-values (when available)
+        - ``value``: scalar value/critic estimate (when available)
+        - ``epsilon``: exploration epsilon (when available)
+        - ``steps``: number of agent update steps
+        """
+        return {}

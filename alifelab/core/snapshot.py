@@ -50,6 +50,9 @@ class EntityView:
     solid: bool = False
     movable: bool = False
     predator: bool = False
+    state: str | None = None
+    action: str | None = None
+    alive: bool = True
 
 
 @dataclass(frozen=True)

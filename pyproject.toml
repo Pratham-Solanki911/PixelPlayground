@@ -13,5 +13,13 @@ dependencies = [
     "torch",
 ]
 
+[project.optional-dependencies]
+ui = ["pygame"]
+test = ["pytest"]
+
 [tool.setuptools.packages.find]
 include = ["alifelab*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
