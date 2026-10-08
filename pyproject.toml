@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alifelab"
+version = "0.1.0"
+description = "PixelPlayground: a modular artificial-life + reinforcement-learning experimentation framework for grid worlds."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "torch",
+]
+
+[tool.setuptools.packages.find]
+include = ["alifelab*"]
