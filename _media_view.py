@@ -42,7 +42,7 @@ def build_session():
     spec = WorldSpec(
         width=SIZE,
         height=SIZE,
-        wrap=True,
+        wrap=False,
         seed=SEED,
         rules=rules_from_config(None),
         entities=[
@@ -52,7 +52,7 @@ def build_session():
                 "controller": "agent",
                 "params": {
                     "body": {"length": 4},
-                    "reproduction": {"enabled": True, "mode": "asexual", "cooldown": 45, "min_energy": 70.0},
+                    "reproduction": {"enabled": False},
                     "energy": {"value": 120.0, "max": 150.0},
                 },
             },
@@ -119,16 +119,25 @@ class DemoSession:
         return None
 
     def _pick(self, snapshot, pos: tuple[int, int], bias: tuple[int, int], occupied: dict) -> tuple[int, int]:
-        """Valid (dx, dy) closest to bias, else any valid move, else stay."""
+        """Valid (dx, dy) closest to bias, else any valid move, else stay.
+
+        On non-wrapping worlds ``normalize`` clamps to the border, so a
+        candidate whose clamped target equals the current cell (move off-grid)
+        is discarded.
+        """
         tries = [bias, (bias[1], bias[0]), (-bias[1], -bias[0]), (-bias[0], -bias[1])]
         for dx, dy in tries:
             if (dx, dy) == (0, 0):
                 continue
             tx, ty = self.world.grid.normalize(pos[0] + dx, pos[1] + dy)
+            if (tx, ty) == pos:
+                continue
             if not occupied.get((tx, ty), False):
                 return (dx, dy)
         for dx, dy in DIRS.values():
             tx, ty = self.world.grid.normalize(pos[0] + dx, pos[1] + dy)
+            if (tx, ty) == pos:
+                continue
             if not occupied.get((tx, ty), False):
                 return (dx, dy)
         return (0, 0)
@@ -271,7 +280,7 @@ def main() -> int:
     session.world.episode = 1
     viz.verify()
 
-    hero_tick = pick_hero_tick(DemoSession(build_session()), steps := 150)
+    hero_tick = pick_hero_tick(DemoSession(build_session()), steps := 100)
     print(f"hero tick selected: {hero_tick or 'none (fallback to last)'}")
 
     frames: list[np.ndarray] = []
@@ -307,16 +316,17 @@ def main() -> int:
     width = min(frames[0].shape[1], 420)
     scale = width / frames[0].shape[1]
     height = int(frames[0].shape[0] * scale)
-    thumb = [imageio_resize(f, (width, height)) for f in frames[::2]]
+    thumb = [imageio_resize(f, (width, height)) for f in frames]
 
     gif_path = ASSETS / "demo.gif"
-    save_gif(gif_path, thumb, fps=12)
-    print(f"saved {gif_path} ({len(thumb)} frames)")
+    fps = 2  # 500 ms per world step
+    save_gif(gif_path, thumb, fps=fps)
+    print(f"saved {gif_path} ({len(thumb)} frames @ {fps} fps)")
 
     import imageio.v2 as iio
 
     mp4_path = ASSETS / "demo.mp4"
-    iio.mimsave(mp4_path, thumb, format="FFMPEG", fps=12, codec="libx264", quality=7, macro_block_size=1)
+    iio.mimsave(mp4_path, thumb, format="FFMPEG", fps=fps, codec="libx264", quality=7, macro_block_size=1)
     print(f"saved {mp4_path}")
 
     for path in sorted(ASSETS.glob("demo.*")):
